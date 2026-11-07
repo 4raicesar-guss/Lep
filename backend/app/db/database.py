@@ -1,17 +1,11 @@
-import os
-from pathlib import Path
 from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
-DEV_DB_PATH = BACKEND_DIR / "dev.db"
-DEV_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+from app.core.config import get_settings
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    f"sqlite+aiosqlite:///{DEV_DB_PATH}",
-)
+# La URL viene de la variable de entorno DATABASE_URL o de backend/.env (Postgres por defecto).
+DATABASE_URL = get_settings().database_url
 
 engine = create_async_engine(
     DATABASE_URL,

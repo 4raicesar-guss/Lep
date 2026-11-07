@@ -55,20 +55,21 @@
   }
 }
 
-.animate-shake {
-  animation: shake 0.35s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
-}
+@layer utilities {
+  .animate-shake {
+    animation: shake 0.35s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  }
 
-.flash-red {
-  animation: flashRed 0.45s ease-out both;
-}
+  .flash-red {
+    animation: flashRed 0.45s ease-out both;
+  }
 
-.animate-float-damage {
-  animation: floatDamage 1s ease-out forwards;
-  pointer-events: none;
-}
+  .animate-float-damage {
+    animation: floatDamage 1s ease-out forwards;
+    pointer-events: none;
+  }
 
-.animate-stun {
-  animation: stunPulse 1.2s ease-in-out infinite;
+  .animate-stun {
+    animation: stunPulse 1.2s ease-in-out infinite;
+  }
 }
-

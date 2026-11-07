@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { hapticFeedback as HapticFeedback } from '@telegram-apps/sdk';
+import { UnitAvatar } from './UnitAvatar';
+import { UNITS_CONFIG } from '../lib/game';
 
 /* =========================================================================
    TIPOS E INTERFACES DEL VISUALIZADOR DE COMBATE
@@ -8,6 +10,7 @@ import { hapticFeedback as HapticFeedback } from '@telegram-apps/sdk';
 export interface UnitConfig {
   name: string;
   sprite: string;
+  image?: string;
   max_hp: number;
   role?: string;
 }
@@ -50,16 +53,13 @@ export interface CombatViewerProps {
    CONFIGURACIÓN POR DEFECTO Y MOCK REPLAY DATA (3-4 TICKS)
    ========================================================================= */
 
-const DEFAULT_UNITS_CONFIG: UnitsConfigMap = {
-  U01: { name: 'Cerdo Blindado', sprite: '🐷', max_hp: 480, role: 'Tanque' },
-  U02: { name: 'Toro Bravo', sprite: '🐂', max_hp: 420, role: 'Tanque' },
-  U03: { name: 'Gallo Asesino', sprite: '🐓', max_hp: 150, role: 'Daño' },
-  U04: { name: 'Cabra Francotiradora', sprite: '🐐', max_hp: 130, role: 'Daño' },
-  U05: { name: 'Pato Bombardero', sprite: '🦆', max_hp: 160, role: 'Daño' },
-  U06: { name: 'Oveja Sanadora', sprite: '🐑', max_hp: 220, role: 'Soporte' },
-  U07: { name: 'Perro Pastor', sprite: '🐕', max_hp: 260, role: 'Soporte' },
-  U08: { name: 'Espantapájaros', sprite: '🌾', max_hp: 310, role: 'Control' },
-};
+// Derivado de la fuente única del cliente (lib/game.ts), que espeja backend/app/engine/data.py
+const DEFAULT_UNITS_CONFIG: UnitsConfigMap = Object.fromEntries(
+  Object.values(UNITS_CONFIG).map((u) => [
+    u.id,
+    { name: u.name, sprite: u.sprite, image: u.image, max_hp: u.baseHp, role: u.role },
+  ]),
+);
 
 /**
  * Grid Inicial Mock 3x3:
@@ -427,9 +427,10 @@ export function CombatViewer({
 
                     {/* SPRITE DE LA UNIDAD */}
                     <div className="relative my-auto flex items-center justify-center">
-                      <span className="text-3xl md:text-4xl filter drop-shadow-md select-none transform transition-transform hover:scale-110">
-                        {config.sprite}
-                      </span>
+                      <UnitAvatar
+                        unitId={cell.unit_id}
+                        className="w-10 h-10 object-contain text-3xl md:text-4xl filter drop-shadow-md select-none transform transition-transform hover:scale-110 flex items-center justify-center"
+                      />
                       {isDead && (
                         <div className="absolute inset-0 flex items-center justify-center font-bold text-red-500 text-2xl">
                           ❌

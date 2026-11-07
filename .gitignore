@@ -15,3 +15,8 @@ dist/
 
 # Environment
 .env
+
+# Temporary / Context dumps
+repo_context.txt
+tinified/
+tinified.zip

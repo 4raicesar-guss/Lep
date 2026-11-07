@@ -1,25 +1,10 @@
-import { initData } from '@telegram-apps/sdk';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+import { getTelegramInitData, API_BASE_URL } from './lib/api';
 
 export async function trackEvent(
   eventName: string,
   payload?: Record<string, unknown>,
 ): Promise<void> {
-  let rawInitData: string | undefined;
-
-  try {
-    initData.restore();
-    rawInitData = typeof initData.raw === 'function'
-      ? initData.raw()
-      : String(initData.raw || '');
-
-    if (!rawInitData) {
-      rawInitData = undefined;
-    }
-  } catch {
-    // Entorno no-Telegram o SDK no disponible
-  }
+  const rawInitData = getTelegramInitData();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
