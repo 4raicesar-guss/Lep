@@ -346,8 +346,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
               className="w-full bg-stone-900/90 border border-stone-800/80 rounded-xl p-3 flex items-center justify-between gap-3 shadow-sm hover:border-stone-700/80 transition"
             >
               <div className="flex items-center gap-3">
-                <div className="w-11 h-11 bg-stone-800/90 border border-stone-700/60 rounded-xl flex items-center justify-center text-2xl shadow-inner select-none">
-                  {config.emoji}
+                <div className="relative w-12 h-12 rounded-xl overflow-hidden border border-stone-700 flex-shrink-0 shadow-inner bg-stone-950">
+                  <img
+                    src={config.image}
+                    alt={config.name}
+                    className="w-full h-full object-cover filter brightness-[0.7] hover:scale-110 transition duration-300"
+                  />
+                  <span className="absolute bottom-0.5 right-0.5 text-xs drop-shadow">{config.emoji}</span>
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
@@ -403,7 +408,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
           className="w-full py-4 px-4 bg-gradient-to-r from-red-600 via-amber-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-stone-950 font-black text-base rounded-2xl shadow-xl shadow-red-950/40 transition active:scale-95 flex items-center justify-center gap-2"
         >
           <span className="text-xl">💥</span> ¡A la Batalla!
-          {!hasEquippedUnits && (
+          {hasEquippedUnits ? (
+            <span className="text-xs bg-stone-950/50 text-amber-300 px-2.5 py-0.5 rounded-full font-bold border border-amber-500/30">
+              Oleada {playerState.player?.current_wave ?? 1}
+            </span>
+          ) : (
             <span className="text-[10px] bg-stone-950/60 text-amber-300 px-2 py-0.5 rounded-full font-semibold">
               Formar primero
             </span>

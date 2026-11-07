@@ -12,7 +12,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { CombatViewer, type ReplayData } from '../components/CombatViewer';
 import { fetchPlayerState, simulateCombat } from '../lib/api';
-import { UNITS_CONFIG, type UnitSlot, type View } from '../lib/game';
+import { UNITS_CONFIG, getStageForWave, type UnitSlot, type View } from '../lib/game';
 import { trackEvent } from '../analytics';
 import { UnitAvatar } from '../components/UnitAvatar';
 
@@ -27,7 +27,7 @@ export function BattlePage({ onNavigate }: BattlePageProps) {
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [formationUnits, setFormationUnits] = useState<UnitSlot[]>([]);
   const [replayData, setReplayData] = useState<ReplayData | null>(null);
-  const [waveNumber] = useState<number>(1);
+  const [waveNumber, setWaveNumber] = useState<number>(1);
 
   // Carga inicial del estado del jugador
   const loadState = useCallback(async () => {
@@ -35,6 +35,11 @@ export function BattlePage({ onNavigate }: BattlePageProps) {
     setErrorMessage('');
     try {
       const state = await fetchPlayerState();
+
+      // Sincronizar oleada actual guardada del jugador
+      if (state.player && typeof state.player.current_wave === 'number') {
+        setWaveNumber(state.player.current_wave);
+      }
 
       // Extraer unidades que estén desplegadas en slots 0..8
       const equipped: UnitSlot[] = [];
@@ -180,26 +185,52 @@ export function BattlePage({ onNavigate }: BattlePageProps) {
           </button>
         </div>
 
-        {/* Visualizador de combate */}
-        <CombatViewer replayData={replayData} />
+        {/* Visualizador de combate con escenario y oleada */}
+        <CombatViewer replayData={replayData} waveNumber={waveNumber} />
 
         {/* Banner de Recompensa y Regreso al ganar */}
         {isWinner && (
-          <div className="w-full mt-4 p-4 bg-gradient-to-b from-amber-950/70 to-stone-900 border-2 border-amber-500/50 rounded-2xl flex flex-col items-center text-center shadow-2xl animate-fade-in">
-            <div className="text-3xl mb-1">🎉</div>
+          <div className="w-full mt-4 p-4 bg-gradient-to-b from-amber-950/80 to-stone-900 border-2 border-amber-500/60 rounded-2xl flex flex-col items-center text-center shadow-2xl animate-fade-in">
+            <div className="text-4xl mb-1 animate-bounce">🌾</div>
             <h3 className="text-lg font-black text-amber-300 uppercase tracking-wide">
               ¡Victoria en la Oleada {waveNumber}!
             </h3>
-            <div className="my-2.5 px-4 py-2 bg-amber-500/20 border border-amber-400/40 rounded-xl flex items-center gap-2 text-amber-200 font-bold text-sm">
-              <span className="text-xl">🌾</span> Recompensa: +100 Grano
+
+            {replayData.villain && (
+              <div className="my-2 p-2.5 bg-stone-950/80 border border-amber-500/30 rounded-xl text-left w-full flex items-center gap-2.5">
+                <span className="text-2xl">{replayData.villain.avatar}</span>
+                <div className="text-xs">
+                  <span className="font-bold text-amber-400 block">{replayData.villain.name}:</span>
+                  <span className="text-stone-300 italic">"{replayData.villain.victory_dialogue}"</span>
+                </div>
+              </div>
+            )}
+
+            <div className="my-2 px-4 py-2 bg-amber-500/20 border border-amber-400/50 rounded-xl flex items-center gap-2 text-amber-200 font-black text-sm">
+              <span className="text-xl">💰</span> +{replayData.reward_grain ?? 100} Grano añadido al stock
             </div>
-            <button
-              type="button"
-              onClick={() => onNavigate?.('home')}
-              className="w-full mt-1 py-3 px-4 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-stone-950 font-bold rounded-xl shadow-lg shadow-amber-950/50 transition active:scale-95 text-sm"
-            >
-              🏠 Volver a la Granja
-            </button>
+
+            <div className="flex gap-2 w-full mt-2">
+              <button
+                type="button"
+                onClick={() => onNavigate?.('home')}
+                className="flex-1 py-3 px-3 bg-stone-800 hover:bg-stone-700 text-stone-200 font-bold rounded-xl text-xs transition active:scale-95 border border-stone-700"
+              >
+                🏠 A la Granja
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const nextW = replayData.next_wave ?? (waveNumber + 1);
+                  setWaveNumber(nextW);
+                  setReplayData(null);
+                  setPhase('ready_to_fight');
+                }}
+                className="flex-1 py-3 px-3 bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-stone-950 font-black rounded-xl shadow-lg shadow-amber-950/50 transition active:scale-95 text-xs flex items-center justify-center gap-1.5"
+              >
+                <span>⚔️</span> Siguiente ({replayData.next_wave ?? waveNumber + 1})
+              </button>
+            </div>
           </div>
         )}
 
@@ -233,13 +264,35 @@ export function BattlePage({ onNavigate }: BattlePageProps) {
   // -------------------------------------------------------------------------
   // Render: Listo para combatir (Mostrar Formación Real del Jugador)
   // -------------------------------------------------------------------------
+  const stage = getStageForWave(waveNumber);
+
   return (
-    <div className="flex flex-col items-center justify-center gap-5 w-full max-w-md mx-auto">
-      {/* Título */}
-      <div className="text-center">
-        <div className="text-3xl mb-1">⚔️</div>
-        <h2 className="text-xl font-bold text-stone-100">Arena de Combate</h2>
-        <p className="text-xs text-stone-400">Oleada {waveNumber} · Simulación determinista en servidor</p>
+    <div className="flex flex-col items-center justify-center gap-4 w-full max-w-md mx-auto">
+      {/* Tarjeta Visual del Escenario Activo */}
+      <div className="w-full relative rounded-2xl overflow-hidden border border-stone-800 shadow-xl">
+        <img
+          src={stage.bgImage}
+          alt={stage.name}
+          className="w-full h-28 object-cover filter brightness-[0.4] saturate-[0.9]"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-stone-950 via-stone-950/50 to-transparent p-3.5 flex flex-col justify-end">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm">📍</span>
+                <span className="text-xs font-bold text-amber-300">{stage.name}</span>
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  Oleada {waveNumber}
+                </span>
+              </div>
+              <p className="text-[11px] text-stone-300 mt-0.5">{stage.description}</p>
+            </div>
+            <div className="text-right">
+              <span className="text-[9px] text-stone-400 block uppercase font-semibold">Recompensa</span>
+              <span className="text-xs font-bold text-amber-400">+100 🌾</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Grid de Formación Real del Jugador */}
@@ -315,7 +368,7 @@ export function BattlePage({ onNavigate }: BattlePageProps) {
             Simulando en el servidor…
           </span>
         ) : (
-          '⚔️ Iniciar Batalla Real'
+          `⚔️ Iniciar Batalla (Oleada ${waveNumber})`
         )}
       </button>
     </div>

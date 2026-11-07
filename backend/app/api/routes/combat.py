@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.core.combat_engine import (
     UNIT_TEMPLATES,
@@ -22,80 +23,16 @@ from app.core.combat_engine import (
 )
 from app.core.security import TelegramAuthError, validate_init_data
 from app.db.database import async_session
-from app.db.models import Battle
+from app.db.models import Battle, Player, UserResource
+from app.engine.villains import EXPANDED_WAVE_COMPOSITIONS, VILLAINS_DATA
 
 router = APIRouter(prefix="/api/combat", tags=["combat"])
 
 # ---------------------------------------------------------------------------
-# Composición de enemigos por oleada (hardcoded temporal — GDD Oleada 1)
-# Estructura: lista de dicts compatibles con SimUnit.__init__
+# Composición de enemigos por oleada (Modular 1-10)
 # ---------------------------------------------------------------------------
 
-WAVE_COMPOSITIONS: dict[int, list[dict[str, Any]]] = {
-    1: [
-        # Oleada 1: Toro Bravo (tanque frontal) + Oveja Sanadora (soporte trasero)
-        {
-            "id": "E01",
-            "unit_id": "U02",  # Toro Bravo
-            "level": 1,
-            "position": 4,  # Centro del grid
-        },
-        {
-            "id": "E02",
-            "unit_id": "U06",  # Oveja Sanadora
-            "level": 1,
-            "position": 5,  # Derecha-centro
-        },
-    ],
-    2: [
-        # Oleada 2: Toro + Gallo + Oveja
-        {
-            "id": "E01",
-            "unit_id": "U02",
-            "level": 1,
-            "position": 3,
-        },
-        {
-            "id": "E02",
-            "unit_id": "U03",
-            "level": 1,
-            "position": 4,
-        },
-        {
-            "id": "E03",
-            "unit_id": "U06",
-            "level": 1,
-            "position": 5,
-        },
-    ],
-    3: [
-        # Oleada 3: Composición reforzada nivel 2
-        {
-            "id": "E01",
-            "unit_id": "U01",
-            "level": 2,
-            "position": 3,
-        },
-        {
-            "id": "E02",
-            "unit_id": "U02",
-            "level": 2,
-            "position": 4,
-        },
-        {
-            "id": "E03",
-            "unit_id": "U07",
-            "level": 1,
-            "position": 5,
-        },
-        {
-            "id": "E04",
-            "unit_id": "U06",
-            "level": 2,
-            "position": 8,
-        },
-    ],
-}
+WAVE_COMPOSITIONS: dict[int, list[dict[str, Any]]] = EXPANDED_WAVE_COMPOSITIONS
 
 # Máxima oleada definida — las oleadas fuera de rango caen aquí
 MAX_WAVE = max(WAVE_COMPOSITIONS.keys())
@@ -147,6 +84,10 @@ class SimulateResponse(BaseModel):
     seed: int
     replay_log: list[dict[str, Any]]
     initial_grid: list[GridCellOut | None]
+    reward_grain: int = 0
+    new_total_grain: int = 0
+    next_wave: int = 1
+    villain: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +221,12 @@ async def simulate_combat(
     # 5. Construir grid inicial para el visualizador
     initial_grid = _build_initial_grid(player_team, enemy_team)
 
-    # 6. Persistir en base de datos (fire-and-forget sincrónico dentro del endpoint)
+    reward_grain = 0
+    new_total_grain = 0
+    next_wave = body.wave_number
+    villain_info = VILLAINS_DATA.get(min(body.wave_number, MAX_WAVE))
+
+    # 6. Persistir en base de datos y otorgar recompensas
     async with async_session() as session:
         battle = Battle(
             id=uuid.uuid4(),
@@ -293,13 +239,38 @@ async def simulate_combat(
             replay_log=result["replay_log"],
         )
         session.add(battle)
+
+        if user_id is not None:
+            player = await session.scalar(select(Player).where(Player.telegram_id == user_id))
+            resource = await session.scalar(select(UserResource).where(UserResource.user_id == user_id))
+
+            if result["winner"] == "player":
+                reward_grain = 100
+                if resource is not None:
+                    resource.grain += reward_grain
+                    new_total_grain = resource.grain
+                if player is not None:
+                    current_pw = getattr(player, "current_wave", 1) or 1
+                    if current_pw <= body.wave_number:
+                        player.current_wave = body.wave_number + 1
+                    next_wave = player.current_wave
+            else:
+                if resource is not None:
+                    new_total_grain = resource.grain
+                if player is not None:
+                    next_wave = getattr(player, "current_wave", 1) or 1
+
         await session.commit()
 
-    # 7. Responder con el replayData completo
+    # 7. Responder con el replayData completo y recompensas
     return SimulateResponse(
         winner=result["winner"],
         total_ticks=result["total_ticks"],
         seed=seed,
         replay_log=result["replay_log"],
         initial_grid=initial_grid,
+        reward_grain=reward_grain,
+        new_total_grain=new_total_grain,
+        next_wave=next_wave,
+        villain=villain_info,
     )

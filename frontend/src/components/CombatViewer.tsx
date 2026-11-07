@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { hapticFeedback as HapticFeedback } from '@telegram-apps/sdk';
 import { UnitAvatar } from './UnitAvatar';
-import { UNITS_CONFIG } from '../lib/game';
+import { UNITS_CONFIG, getStageForWave, type VillainInfo } from '../lib/game';
 
 /* =========================================================================
    TIPOS E INTERFACES DEL VISUALIZADOR DE COMBATE
@@ -42,11 +42,17 @@ export interface ReplayData {
   total_ticks: number;
   replay_log: ReplayLogEvent[];
   initial_grid?: (GridCell | null)[];
+  seed?: number;
+  reward_grain?: number;
+  new_total_grain?: number;
+  next_wave?: number;
+  villain?: VillainInfo;
 }
 
 export interface CombatViewerProps {
   replayData?: ReplayData;
   unitsConfig?: UnitsConfigMap;
+  waveNumber?: number;
 }
 
 /* =========================================================================
@@ -137,10 +143,11 @@ const MOCK_REPLAY_DATA: ReplayData = {
 /* =========================================================================
    ESTRUCTURA DE TEXTOS FLOTANTES DE DAÑO (-{damage})
    ========================================================================= */
-interface FloatingDamage {
+interface FloatingText {
   key: string;
   gridIndex: number;
-  damage: number;
+  text: string;
+  type: 'damage' | 'heal';
 }
 
 /* =========================================================================
@@ -150,7 +157,11 @@ interface FloatingDamage {
 export function CombatViewer({
   replayData = MOCK_REPLAY_DATA,
   unitsConfig = DEFAULT_UNITS_CONFIG,
+  waveNumber = 1,
 }: CombatViewerProps) {
+  // Escenario correspondiente a la oleada
+  const stage = getStageForWave(waveNumber);
+
   // Determina el grid de partida (props o mock)
   const initialGrid = replayData.initial_grid || DEFAULT_INITIAL_GRID;
 
@@ -163,8 +174,9 @@ export function CombatViewer({
   // Estados visuales de Juice
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [damagedIndices, setDamagedIndices] = useState<Set<number>>(new Set());
+  const [healedIndices, setHealedIndices] = useState<Set<number>>(new Set());
   const [attackingIndices, setAttackingIndices] = useState<Set<number>>(new Set());
-  const [floatingDamages, setFloatingDamages] = useState<FloatingDamage[]>([]);
+  const [floatingTexts, setFloatingTexts] = useState<FloatingText[]>([]);
 
   // Helper para disparar retroalimentación háptica segura de Telegram Mini Apps
   const triggerHaptic = useCallback((style: 'light' | 'medium' | 'heavy' = 'medium') => {
@@ -184,14 +196,14 @@ export function CombatViewer({
     setCurrentTick(0);
     setGridState(initialGrid.map((c) => (c ? { ...c } : null)));
     setDamagedIndices(new Set());
+    setHealedIndices(new Set());
     setAttackingIndices(new Set());
-    setFloatingDamages([]);
+    setFloatingTexts([]);
     setIsPlaying(true);
   }, [initialGrid]);
 
   /**
    * Aplica un tick del replay_log al gridState sin calcular daño en el frontend.
-   * "El frontend es un títere mudo: NO calcula daño, solo asigna valores desde el log".
    */
   const processTick = useCallback(
     (tickNumber: number) => {
@@ -199,15 +211,14 @@ export function CombatViewer({
       if (events.length === 0) return;
 
       const newDamagedSlots = new Set<number>();
+      const newHealedSlots = new Set<number>();
       const newAttackerSlots = new Set<number>();
-      const newFloatingNumbers: FloatingDamage[] = [];
+      const newFloatingItems: FloatingText[] = [];
 
       setGridState((prevGrid) => {
-        // Clon superficial de las celdas para inmutabilidad limpia
         const nextGrid = prevGrid.map((cell) => (cell ? { ...cell } : null));
 
         for (const event of events) {
-          // Encontrar índice del actor y del objetivo
           const actorIdx = nextGrid.findIndex((c) => c && c.id === event.actor_id);
           const targetIdx = nextGrid.findIndex((c) => c && c.id === event.target_id);
 
@@ -216,31 +227,28 @@ export function CombatViewer({
           }
 
           if (event.action === 'attack') {
-            // JUICE OBLIGATORIO: HapticFeedback.impactOccurred('medium')
             triggerHaptic('medium');
 
             if (targetIdx !== -1 && nextGrid[targetIdx]) {
               const targetUnit = nextGrid[targetIdx]!;
               newDamagedSlots.add(targetIdx);
 
-              // Asignación directa desde el log (sin fórmula ni lógica de mitigación)
               if (event.target_hp !== undefined) {
                 targetUnit.current_hp = event.target_hp;
               } else if (event.damage !== undefined) {
                 targetUnit.current_hp = Math.max(0, targetUnit.current_hp - event.damage);
               }
 
-              // Aplicar aturdimiento si el log lo indica
               if (event.stun !== undefined) {
                 targetUnit.is_stunned = Boolean(event.stun);
               }
 
-              // JUICE: Texto flotante -{damage}
               if (event.damage !== undefined) {
-                newFloatingNumbers.push({
-                  key: `${tickNumber}-${event.actor_id}-${event.target_id}-${Math.random()}`,
+                newFloatingItems.push({
+                  key: `dmg-${tickNumber}-${event.actor_id}-${event.target_id}-${Math.random()}`,
                   gridIndex: targetIdx,
-                  damage: event.damage,
+                  text: `-${event.damage}`,
+                  type: 'damage',
                 });
               }
             }
@@ -248,10 +256,19 @@ export function CombatViewer({
             nextGrid[targetIdx]!.is_stunned = true;
           } else if (event.action === 'heal' && targetIdx !== -1 && nextGrid[targetIdx]) {
             const targetUnit = nextGrid[targetIdx]!;
+            newHealedSlots.add(targetIdx);
             if (event.target_hp !== undefined) {
               targetUnit.current_hp = event.target_hp;
             } else if (event.heal !== undefined) {
               targetUnit.current_hp = Math.min(targetUnit.max_hp, targetUnit.current_hp + event.heal);
+            }
+            if (event.heal !== undefined) {
+              newFloatingItems.push({
+                key: `heal-${tickNumber}-${event.actor_id}-${event.target_id}-${Math.random()}`,
+                gridIndex: targetIdx,
+                text: `+${event.heal}`,
+                type: 'heal',
+              });
             }
           }
         }
@@ -259,27 +276,26 @@ export function CombatViewer({
         return nextGrid;
       });
 
-      // Activar sacudida (animate-shake) y destello rojo (flash-red) temporal
       if (newDamagedSlots.size > 0) {
         setDamagedIndices(newDamagedSlots);
-        setTimeout(() => {
-          setDamagedIndices(new Set());
-        }, 450);
+        setTimeout(() => setDamagedIndices(new Set()), 450);
+      }
+
+      if (newHealedSlots.size > 0) {
+        setHealedIndices(newHealedSlots);
+        setTimeout(() => setHealedIndices(new Set()), 450);
       }
 
       if (newAttackerSlots.size > 0) {
         setAttackingIndices(newAttackerSlots);
-        setTimeout(() => {
-          setAttackingIndices(new Set());
-        }, 350);
+        setTimeout(() => setAttackingIndices(new Set()), 350);
       }
 
-      // Registrar textos flotantes y eliminarlos a los 1000ms
-      if (newFloatingNumbers.length > 0) {
-        setFloatingDamages((prev) => [...prev, ...newFloatingNumbers]);
+      if (newFloatingItems.length > 0) {
+        setFloatingTexts((prev) => [...prev, ...newFloatingItems]);
         setTimeout(() => {
-          setFloatingDamages((prev) =>
-            prev.filter((d) => !newFloatingNumbers.some((n) => n.key === d.key))
+          setFloatingTexts((prev) =>
+            prev.filter((d) => !newFloatingItems.some((n) => n.key === d.key))
           );
         }, 1000);
       }
@@ -313,6 +329,22 @@ export function CombatViewer({
 
   return (
     <div className="flex flex-col items-center justify-center p-4 max-w-md mx-auto select-none font-sans text-stone-100">
+      {/* INFORMACIÓN DEL ESCENARIO */}
+      <div className="w-full mb-2.5 px-3 py-2 bg-gradient-to-r from-stone-900 to-stone-950 border border-stone-800 rounded-xl shadow-md flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">📍</span>
+          <div>
+            <div className="text-xs font-bold text-amber-300 tracking-wide flex items-center gap-1.5">
+              <span>{stage.name}</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                Oleada {waveNumber}
+              </span>
+            </div>
+            <span className="text-[10px] text-stone-400 block">{stage.description}</span>
+          </div>
+        </div>
+      </div>
+
       {/* CABECERA DEL COMBATE (HUD) */}
       <div className="w-full bg-stone-900/90 border border-stone-800 rounded-xl p-3 mb-3 shadow-lg flex items-center justify-between">
         <div>
@@ -353,22 +385,30 @@ export function CombatViewer({
       {/* RESULTADO AL FINALIZAR */}
       {isCombatOver && (
         <div
-          className={`w-full py-2 px-4 rounded-lg mb-3 text-center text-sm font-bold shadow-md transition-all ${
+          className={`w-full py-2.5 px-4 rounded-xl mb-3 text-center text-sm font-bold shadow-lg transition-all ${
             replayData.winner === 'player'
-              ? 'bg-emerald-900/80 text-emerald-300 border border-emerald-600/50'
-              : 'bg-rose-950/80 text-rose-300 border border-rose-600/50'
+              ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-500/60 shadow-emerald-950/40'
+              : 'bg-rose-950/90 text-rose-300 border border-rose-600/60 shadow-rose-950/40'
           }`}
         >
           {replayData.winner === 'player' ? '🏆 ¡VICTORIA ALIADA!' : '💀 DERROTA EN COMBATE'}
         </div>
       )}
 
-      {/* TABLERO DE COMBATE 3x3 */}
-      <div className="relative w-full aspect-square max-w-[360px] bg-stone-950/90 border-2 border-stone-800 rounded-2xl p-2.5 shadow-2xl backdrop-blur-sm">
+      {/* TABLERO DE COMBATE 3x3 CON ESCENARIO DE FONDO */}
+      <div className="relative w-full aspect-square max-w-[360px] rounded-2xl overflow-hidden border-2 border-stone-700/80 shadow-2xl p-2.5">
+        {/* Imagen de fondo del Escenario Real */}
+        <img
+          src={stage.bgImage}
+          alt={stage.name}
+          className="absolute inset-0 w-full h-full object-cover filter brightness-[0.35] saturate-[0.85] scale-105 pointer-events-none select-none"
+        />
+        <div className="absolute inset-0 bg-stone-950/45 backdrop-blur-[1px] pointer-events-none" />
+
         {/* Marcador táctico de fondo */}
-        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 p-2.5 pointer-events-none opacity-10">
+        <div className="absolute inset-0 grid grid-cols-3 grid-rows-3 p-2.5 pointer-events-none opacity-20 z-0">
           {Array.from({ length: 9 }).map((_, i) => (
-            <div key={`grid-line-${i}`} className="border border-stone-600 rounded-lg m-0.5" />
+            <div key={`grid-line-${i}`} className="border border-stone-300/40 rounded-xl m-0.5" />
           ))}
         </div>
 
@@ -376,35 +416,42 @@ export function CombatViewer({
           {gridState.map((cell, index) => {
             const config = cell ? unitsConfig[cell.unit_id] : null;
             const isDamaged = damagedIndices.has(index);
+            const isHealed = healedIndices.has(index);
             const isAttacking = attackingIndices.has(index);
             const isDead = cell ? cell.current_hp <= 0 : false;
             const hpPercent = cell
               ? Math.max(0, Math.min(100, (cell.current_hp / cell.max_hp) * 100))
               : 0;
 
-            // Filtro de daños flotantes que pertenecen a esta celda
-            const cellDamages = floatingDamages.filter((d) => d.gridIndex === index);
+            // Filtro de textos flotantes (daño / cura) que pertenecen a esta celda
+            const cellTexts = floatingTexts.filter((d) => d.gridIndex === index);
 
             return (
               <div
                 key={`cell-${index}`}
-                className={`relative flex flex-col items-center justify-between p-1.5 rounded-xl border transition-all duration-200 overflow-visible ${
+                className={`relative flex flex-col items-center justify-between p-1.5 rounded-xl border transition-all duration-200 overflow-visible backdrop-blur-sm ${
                   cell
                     ? cell.team === 'player'
-                      ? 'bg-gradient-to-b from-stone-800 to-stone-900 border-amber-600/40'
-                      : 'bg-gradient-to-b from-rose-950/40 to-stone-900 border-rose-600/40'
-                    : 'bg-stone-900/30 border-stone-800/40 border-dashed'
+                      ? 'bg-stone-900/85 border-amber-500/50 shadow-md'
+                      : 'bg-stone-900/85 border-rose-600/50 shadow-md'
+                    : 'bg-stone-950/35 border-stone-700/35 border-dashed'
                 } ${isDamaged ? 'animate-shake flash-red' : ''} ${
-                  isAttacking ? 'scale-105 ring-2 ring-amber-400/70' : ''
-                } ${isDead ? 'opacity-40 grayscale' : ''}`}
+                  isHealed ? 'flash-green' : ''
+                } ${isAttacking ? 'animate-lunge ring-2 ring-amber-400/90 z-20' : ''} ${
+                  isDead ? 'opacity-35 scale-90 grayscale duration-500' : ''
+                }`}
               >
-                {/* TEXTOS FLOTANTES DE DAÑO (-{damage}) */}
-                {cellDamages.map((dmg) => (
+                {/* TEXTOS FLOTANTES DE DAÑO O CURA */}
+                {cellTexts.map((item) => (
                   <div
-                    key={dmg.key}
-                    className="absolute -top-3 z-30 font-black text-rose-400 text-base md:text-lg tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,1)] animate-float-damage select-none"
+                    key={item.key}
+                    className={`absolute -top-3.5 z-30 font-black text-base md:text-lg tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,1)] select-none ${
+                      item.type === 'damage'
+                        ? 'text-rose-400 animate-float-damage'
+                        : 'text-emerald-400 animate-float-heal'
+                    }`}
                   >
-                    -{dmg.damage}
+                    {item.text}
                   </div>
                 ))}
 

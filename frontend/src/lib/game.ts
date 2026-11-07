@@ -54,6 +54,7 @@ export interface BuildingConfig {
   id: BuildingId;
   name: string;
   emoji: string;
+  image: string;
   description: string;
   bonusText: (level: number) => string;
 }
@@ -63,6 +64,7 @@ export const BUILDINGS_CONFIG: Record<BuildingId, BuildingConfig> = {
     id: 'silo',
     name: 'Silo',
     emoji: '🌾',
+    image: '/assets/buildings/bg_siloxidado.png',
     description: 'Almacenamiento offline de grano.',
     bonusText: (level) => `Cap: ${Math.min(4 + 2 * level, 12)}h offline`,
   },
@@ -70,6 +72,7 @@ export const BUILDINGS_CONFIG: Record<BuildingId, BuildingConfig> = {
     id: 'galpon',
     name: 'Galpón',
     emoji: '🏚️',
+    image: '/assets/buildings/bg_corral_principal.png',
     description: 'Generación pasiva de recursos.',
     bonusText: (level) => `Producción: ${Math.round(120 * (1 + 0.15 * level))} grano/h`,
   },
@@ -77,10 +80,66 @@ export const BUILDINGS_CONFIG: Record<BuildingId, BuildingConfig> = {
     id: 'boyero',
     name: 'Boyero',
     emoji: '⚡',
+    image: '/assets/buildings/bg_huerto_calabazas.png',
     description: 'Cercado perimetral y seguridad.',
     bonusText: (level) => `Defensa: Nivel ${level}`,
   },
 };
+
+// ---------------------------------------------------------------------------
+// Configuración de Escenarios y Villanos
+// ---------------------------------------------------------------------------
+
+export interface StageConfig {
+  id: string;
+  name: string;
+  description: string;
+  bgImage: string;
+  minWave: number;
+  maxWave: number;
+}
+
+export const STAGES_CONFIG: Record<string, StageConfig> = {
+  corral: {
+    id: 'corral',
+    name: 'Corral Principal',
+    description: 'La primera línea de defensa de la granja.',
+    bgImage: '/assets/buildings/bg_corral_principal.png',
+    minWave: 1,
+    maxWave: 3,
+  },
+  huerto: {
+    id: 'huerto',
+    name: 'Huerto de Calabazas',
+    description: 'Campos sombríos entre cosechas y trincheras.',
+    bgImage: '/assets/buildings/bg_huerto_calabazas.png',
+    minWave: 4,
+    maxWave: 6,
+  },
+  silo: {
+    id: 'silo',
+    name: 'Silo Oxidado',
+    description: 'La fortaleza industrial de metal y grano.',
+    bgImage: '/assets/buildings/bg_siloxidado.png',
+    minWave: 7,
+    maxWave: 999,
+  },
+};
+
+export function getStageForWave(wave: number): StageConfig {
+  if (wave <= 3) return STAGES_CONFIG.corral;
+  if (wave <= 6) return STAGES_CONFIG.huerto;
+  return STAGES_CONFIG.silo;
+}
+
+export interface VillainInfo {
+  name: string;
+  title: string;
+  avatar: string;
+  stage_id: string;
+  intro_dialogue: string;
+  victory_dialogue: string;
+}
 
 /**
  * Calcula el coste en grano para subir de nivel un edificio:
@@ -98,6 +157,7 @@ export interface PlayerInfo {
   telegram_id: number;
   username?: string | null;
   first_name: string;
+  current_wave: number;
 }
 
 export interface ResourcesInfo {

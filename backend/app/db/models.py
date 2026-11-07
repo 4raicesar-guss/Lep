@@ -17,6 +17,7 @@ class Player(Base):
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     first_name: Mapped[str] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    current_wave: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
 
 
 class AnalyticsEvent(Base):

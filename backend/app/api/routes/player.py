@@ -36,6 +36,7 @@ class PlayerInfo(BaseModel):
     telegram_id: int
     username: str | None = None
     first_name: str
+    current_wave: int = 1
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -158,6 +159,7 @@ async def get_player_state(
             telegram_id=player.telegram_id,
             username=player.username,
             first_name=player.first_name,
+            current_wave=getattr(player, "current_wave", 1) or 1,
         ),
         resources=ResourcesInfo(
             grain=resources.grain,
